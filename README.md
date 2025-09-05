@@ -4,7 +4,7 @@
 
 支持大部分linux系统，支持Wayland，支持统信UOS。
 
-本项目的AI辅助开发过程见文章 https://blog.csdn.net/ddzr972435946/article/details/151216504
+本项目的AI辅助开发过程见 [文章](https://blog.csdn.net/ddzr972435946/article/details/151216504)
 
 # 安装和配置
 
