@@ -1,0 +1,2903 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>远程控制</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#165DFF',
+                        secondary: '#36CFC9',
+                        dark: '#1D2129',
+                        light: '#F2F3F5'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- In index.html, update the style section -->
+
+
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .screen-container {
+                @apply relative bg-dark rounded-lg overflow-hidden shadow-xl;
+            }
+            .control-panel {
+                @apply bg-white rounded-lg shadow-lg p-4 mb-4;
+            }
+            .btn-primary {
+                @apply bg-primary hover:bg-primary/90 text-white font-medium py-2 px-4 rounded transition-all;
+            }
+            .input-field {
+                @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 w-full;
+            }
+            
+            /* Fullscreen video styles */
+            #fullscreen-container {
+                touch-action: none;
+            }
+            
+            /* Control bar styles - smaller buttons and hidden by default */
+            #control-bar {
+                transform: translateY(-100%);
+                transition: transform 0.3s ease-in-out;
+                z-index: 20;
+            }
+           
+            /* Ensure control bar can be shown manually */
+            #control-bar.visible {
+                transform: translateY(0);
+            }
+            
+            /* Smaller buttons in control bar */
+            #control-bar button {
+                @apply py-1 px-2 text-sm;
+            }
+           
+            /* Add image rendering optimization */
+            #remote-screen {
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: crisp-edges;
+                transition: opacity 0.1s ease-in-out; /* Smooth fade transition */
+            }
+
+            /* Better fullscreen cover styling */
+            #remote-screen.fullscreen-cover {
+                width: 100%;
+                height: 100%;
+                object-fit: contain; /* Changed from cover to contain for better quality */
+                max-width: none;
+                max-height: none;
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: crisp-edges;
+                transition: opacity 0.1s ease-in-out; /* Smooth fade transition */
+            }
+
+            /* Add specific video styling */
+            #remoteVideo {
+                max-width: 100%;
+                max-height: 100%;
+                width: auto;
+                height: auto;
+                object-fit: contain;
+            }
+
+            /* Make sure the manual play overlay is visible when not hidden */
+            #manual-play-overlay {
+                display: flex;
+            }
+
+            #manual-play-overlay.hidden {
+                display: none;
+            }
+
+            /* Ensure the button is clearly visible */
+            #manual-play-btn {
+                z-index: 30;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            
+            .control-bar-toggle-triangle {
+                position: absolute;
+                top: 0;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 30px;
+                height: 15px;
+                background-color: rgb(255, 251, 2);
+                clip-path: polygon(50% 100%, 0 0, 100% 0);
+                cursor: pointer;
+                z-index: 15;
+                transition: all 0.3s ease;
+                display: none; /* Hidden by default */
+            }
+
+            .control-bar-toggle-triangle:hover {
+                background-color: rgba(50, 50, 50, 0.9);
+            }
+
+            /* Ensure the triangle is visible in fullscreen mode */
+            #fullscreen-container[data-fullwindow="true"] .control-bar-toggle-triangle {
+                display: block;
+            }
+
+        }
+    </style>
+
+
+</head>
+<body class="bg-gray-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-[clamp(1.8rem,4vw,2.5rem)] font-bold text-dark mb-2">远程控制</h1>
+            <p class="text-gray-600">通过浏览器远程控制远端系统</p>
+        </header>
+
+        <!-- 连接面板 -->
+        <div id="connection-panel" class="control-panel">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <i class="fa fa-link text-primary mr-2"></i>建立连接
+            </h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700 mb-1">控制密码</label>
+                    <input type="password" id="password" class="input-field" placeholder="请输入控制密码" autofocus>
+                </div>
+                <button id="connect-btn" class="btn-primary w-full flex justify-center items-center">
+                    <i class="fa fa-play mr-2"></i>连接被控端
+                </button>
+                <div id="status" class="text-center text-gray-600 py-2"></div>
+            </div>
+        </div>
+
+        <!-- 控制界面（初始隐藏） -->
+        <div id="control-interface" class="hidden">
+            <!-- Fullscreen container -->
+            <div id="fullscreen-container" class="fixed inset-0 bg-black z-50">
+                <!-- Hidden control bar that appears on hover -->
+                <div id="control-bar" class="absolute top-0 left-0 right-0 bg-black/70 text-white p-4 transform -translate-y-full transition-transform duration-300 z-10">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <h2 class="text-xl font-semibold flex items-center">
+                            <i class="fa fa-desktop text-primary mr-2"></i>远程桌面
+                        </h2>
+                        <div class="flex flex-wrap gap-2">               
+                            <button id="disconnect-btn" class="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded transition-all">
+                                <i class="fa fa-stop mr-1"></i>断开连接
+                            </button>
+                            <button id="screen-off-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2 px-4 rounded transition-all">
+                                <i class="fa fa-television mr-1"></i>关闭屏幕
+                            </button>
+                            <button id="screen-on-btn" class="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded transition-all">
+                                <i class="fa fa-television mr-1"></i>打开屏幕
+                            </button>
+                            <button id="lock-screen-btn" class="bg-purple-500 hover:bg-purple-600 text-white font-medium py-2 px-4 rounded transition-all">
+                                <i class="fa fa-lock mr-1"></i>锁定屏幕
+                            </button>                                    
+                        </div>
+                    </div>
+                </div>
+
+               
+                <!-- Video container -->
+                <div id="video-container" class="w-full h-full flex items-center justify-center">
+                    <video id="remoteVideo" class="max-w-full max-h-full" autoplay playsinline muted></video>
+                    <img id="remote-screen" class="w-full h-full object-cover hidden" src="" alt="远程屏幕">
+                    
+                    <!-- Manual play overlay - make sure this is properly structured -->
+                    <div id="manual-play-overlay" class="absolute inset-0 flex items-center justify-center bg-black/70 z-20 hidden">
+                        <div class="text-center">
+                            <button id="manual-play-btn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-6 rounded-lg flex items-center">
+                                <i class="fa fa-play mr-2"></i>点击播放视频
+                            </button>
+                            <p class="text-white mt-2 text-sm">浏览器需要用户交互才能播放视频</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Loading indicator -->
+                <div id="loadingIndicator" class="absolute inset-0 bg-dark/50 flex items-center justify-center">
+                    <div class="text-white text-xl">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+// 全局变量
+let pc;
+let dataChannel;
+let screenUpdateInterval;
+let isConnected = false;
+let sessionId = null;
+let fallbackMode = 'webrtc'; // 'webrtc', 'http'
+let activeMode = 'none'; // or connectionMode
+let connectionMode = 'none'; // Use one consistent variable
+let commandQueue = [];
+let isRetrying = false;
+let controlEventsAdded = false;
+let lastMouseMoveTime = 0;
+const MOUSE_MOVE_THROTTLE = 180; // ~60 FPS (1000ms/60 ≈ 16ms)
+let isControlBarVisible = false;
+let controlBarToggleBtn = null;
+let controlBarCloseBtn = null;
+// Scroll event throttling
+let lastScrollTime = 0;
+const SCROLL_THROTTLE = 50; // 50ms throttle for scroll events
+let scrollDeltaAccumulator = 0; // Accumulate scroll deltas for better sensitivity
+let lastHTTPMouseMoveTime = 0; // Add this for HTTP mouse throttling
+const HTTP_MOUSE_THROTTLE = MOUSE_MOVE_THROTTLE; // 50ms delay for HTTP mouse events
+let videoSizingTimeout = null;
+// Create a global variable to track the current stream
+let currentStream = null;
+// Initialize manual playback functionality
+let manualPlaybackControls = null;
+// Add this event listener after the passwordInput is defined
+// Enhanced srcObject monitoring and protection
+let isCleaningUp = false;
+// Fixed periodic monitoring
+let monitoringInterval = null;
+// Enhanced stream management
+let managedStreams = new Set();
+// Global state tracking
+let currentTracks = new Map(); // Track ID -> Track mapping
+let streamToVideoBinding = new WeakMap(); // Stream -> Video element binding
+// Periodic state consistency checking
+let consistencyCheckInterval = null;
+let lastRecordedStreamId = null;
+// 键盘输入节流
+let lastKeyPressTime = 0;
+const KEY_PRESS_THROTTLE = 50; // 50ms minimum between key presses
+// 鼠标点按拖动相关变量
+let isMouseDown = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let lastMouseX = 0;
+let lastMouseY = 0;
+let currentMouseButton = 0;
+
+
+// DOM元素
+const connectionPanel = document.getElementById('connection-panel');
+const controlInterface = document.getElementById('control-interface');
+const connectBtn = document.getElementById('connect-btn');
+const disconnectBtn = document.getElementById('disconnect-btn');
+const passwordInput = document.getElementById('password');
+const statusElement = document.getElementById('status');
+const loadingIndicator = document.getElementById('loadingIndicator');
+const screenOffBtn = document.getElementById('screen-off-btn');
+const screenOnBtn = document.getElementById('screen-on-btn');
+const lockScreenBtn = document.getElementById('lock-screen-btn');
+const fullscreenContainer = document.getElementById('fullscreen-container');
+const controlBar = document.getElementById('control-bar');
+const videoContainer = document.getElementById('video-container');
+
+
+// Create a single source of truth for video element access
+function getVideoElement() {
+    return document.getElementById('remoteVideo');
+}
+
+// Add this event listener after the passwordInput is defined
+passwordInput.addEventListener('keypress', (e) => {
+    // Check if the pressed key is Enter
+    if (e.key === 'Enter') {
+        // Prevent default behavior (form submission)
+        e.preventDefault();
+        
+        // Trigger the connect button click
+        connectBtn.click();
+    }
+});
+
+// Screen updates via HTTP 
+function startHTTPScreenUpdates() {
+    console.log('[HTTP] Starting HTTP screen updates');
+    const video = document.getElementById('remoteVideo');
+    const img = document.getElementById('remote-screen');
+    
+    // Hide video and show image for HTTP mode
+    if (video) {
+        video.classList.add('hidden');
+    }
+    
+    if (img) {
+        img.classList.remove('hidden');
+        img.classList.add('fullscreen-cover');
+        console.log('[HTTP] Switched to image display mode');
+    } else {
+        console.error('[HTTP] Image element not found');
+        return;
+    }
+
+
+    // Clear any existing screen update interval
+    if (window.screenUpdateTimer) {
+        clearInterval(window.screenUpdateTimer);
+        window.screenUpdateTimer = null;
+    }
+        
+    // Start screen update interval - reduced frequency to 5 FPS
+    window.screenUpdateTimer = setInterval(async () => {
+        if (!sessionId) {
+            console.log('[HTTP] No session ID, stopping screen updates');
+            clearInterval(window.screenUpdateTimer);
+            return;
+        }
+        
+        try {
+            const response = await fetch('/screen-update');
+            if (response.ok) {
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                // Only update if image element still exists
+                if (img) {
+                    // Revoke previous object URL to prevent memory leaks
+                    if (img.src) {
+                        URL.revokeObjectURL(img.src);
+                    }
+                    img.src = imageUrl;
+                } else {
+                    // Clean up if element no longer exists
+                    URL.revokeObjectURL(imageUrl);
+                }
+            } else if (response.status === 404) {
+                console.log('[HTTP] Session not found, stopping screen updates');
+                clearInterval(window.screenUpdateTimer);
+                showStatus('会话已结束', 'warning');
+            }
+        } catch (error) {
+            console.error('[HTTP] Screen update failed:', error);
+            // Don't stop on temporary errors, but log them
+        }
+    }, 200); // 5 FPS - adjust timing as needed
+    
+    console.log('[HTTP] Screen updates started with 200ms interval');
+}
+
+// Update the command polling to reduce frequency
+function startCommandPolling() {
+    // Clear any existing command polling interval
+    if (window.commandPollingTimer) {
+        clearInterval(window.commandPollingTimer);
+        window.commandPollingTimer = null;
+    }
+    
+    // Clear legacy interval if exists
+    if (screenUpdateInterval) {
+        clearInterval(screenUpdateInterval);
+        screenUpdateInterval = null;
+    }
+    
+    // Start command polling interval - increased interval to reduce load
+    window.commandPollingTimer = setInterval(async () => {
+        if (!sessionId) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/command/get?session_id=${sessionId}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.commands && data.commands.length > 0) {
+                    data.commands.forEach(cmd => {
+                        if (cmd.command.type === 'ack') {
+                            // Handle ack silently
+                        } else if (cmd.command.type === 'error') {
+                            showStatus('命令执行错误: ' + cmd.command.error, 'error');
+                        } else if (cmd.command.type === 'screen_info') {
+                            // Store actual screen information for coordinate mapping
+                            window.controlledScreen = {
+                                width: cmd.command.width,
+                                height: cmd.command.height
+                            };
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            // Handle errors silently to reduce console noise
+        }
+    }, 100); // Increased to 100ms (10 FPS) to reduce load
+    
+}
+
+// Unified mouse event handler
+function setupMouseControlEvents(container) {
+    if (!container) return;
+    
+    // Mouse move handler
+    const handleMouseMove = (e) => {
+        // console.log('[Mouse] Mouse move event triggered');
+        const startTime = performance.now();
+        const currentTime = Date.now();
+        
+        // Throttle mouse movement
+        if (currentTime - lastMouseMoveTime < MOUSE_MOVE_THROTTLE) {
+            return;
+        }
+        lastMouseMoveTime = currentTime;
+        
+        const coords = mapCoordinates(e.clientX, e.clientY);
+        if (coords) {
+            lastMouseX = coords.x;
+            lastMouseY = coords.y;
+            
+            if (isMouseDown) {
+                // Send mouse drag command
+                sendControlCommand({
+                    type: 'mouse_drag',
+                    button: currentMouseButton === 0 ? 'left' : 
+                           currentMouseButton === 2 ? 'right' : 'middle',
+                    x: coords.x,
+                    y: coords.y,
+                    startX: dragStartX,
+                    startY: dragStartY
+                });
+            } else {
+                // Send mouse move command
+                sendControlCommand({
+                    type: 'mouse_move',
+                    x: coords.x,
+                    y: coords.y
+                });
+            }
+        }
+        
+        const endTime = performance.now();
+        if (endTime - startTime > 10) {
+            console.warn(`Mouse move processing took ${endTime - startTime}ms`);
+        }
+    };
+    
+    // Mouse down handler
+    const handleMouseDown = (e) => {
+        // console.log('[Mouse] Mouse down event triggered');
+        e.preventDefault();
+        isMouseDown = true;
+        currentMouseButton = e.button;
+        
+        const coords = mapCoordinates(e.clientX, e.clientY);
+        if (coords) {
+            dragStartX = coords.x;
+            dragStartY = coords.y;
+            lastMouseX = coords.x;
+            lastMouseY = coords.y;
+            
+            // Record mouse down time and position for click detection
+            mouseDownStartTime = Date.now();
+            mouseDownStartX = coords.x;
+            mouseDownStartY = coords.y;
+
+            sendControlCommand({
+                type: 'mouse_down',
+                button: e.button === 0 ? 'left' : 
+                       e.button === 2 ? 'right' : 'middle',
+                x: coords.x,
+                y: coords.y
+            });
+        }
+    };
+    
+    // Mouse up handler
+    const handleMouseUp = (e) => {
+        // console.log('[Mouse] Mouse up event triggered');
+        if (!isMouseDown) return;
+        isMouseDown = false;
+        
+        const coords = mapCoordinates(e.clientX, e.clientY);
+        if (coords) {
+            // Check if this is a click (quick press and release at same location)
+            const timeDiff = Date.now() - mouseDownStartTime;
+            const distance = Math.sqrt(
+                Math.pow(coords.x - mouseDownStartX, 2) + 
+                Math.pow(coords.y - mouseDownStartY, 2)
+            );
+            
+            if (timeDiff <= 200 && distance <= 5) { // 200ms and 5 pixels threshold
+                // Send click command
+                sendControlCommand({
+                    type: 'mouse_click',
+                    button: e.button === 0 ? 'left' : 
+                        e.button === 2 ? 'right' : 'middle',
+                    x: coords.x,
+                    y: coords.y
+                });
+            } else {
+                // Send regular mouse up
+                sendControlCommand({
+                    type: 'mouse_up',
+                    button: e.button === 0 ? 'left' : 
+                        e.button === 2 ? 'right' : 'middle',
+                    x: coords.x,
+                    y: coords.y
+                });
+            }
+        }
+    };
+
+    const handleClick = (e) => {
+        const coords = mapCoordinates(e.clientX, e.clientY);
+        if (coords) {
+            // Send mouse click command for actual clicks
+            sendControlCommand({
+                type: 'mouse_click',
+                button: e.button === 0 ? 'left' : 
+                    e.button === 2 ? 'right' : 'middle',
+                x: coords.x,
+                y: coords.y
+            });
+        }
+    };
+    
+    // Mouse leave handler
+    const handleMouseLeave = (e) => {
+        if (isMouseDown) {
+            isMouseDown = false;
+            sendControlCommand({
+                type: 'mouse_up',
+                button: 'left',
+                x: lastMouseX,
+                y: lastMouseY
+            });
+        }
+    };
+    
+    // Wheel handler
+    let scrollEndTimer = null;
+    const handleWheel = (e) => {
+        e.preventDefault();
+        const currentTime = Date.now();
+        
+        // Accumulate scroll delta for better sensitivity
+        scrollDeltaAccumulator += -e.deltaY;
+        
+        // Throttle scroll events
+        if (currentTime - lastScrollTime >= SCROLL_THROTTLE) {
+            const scrollAmount = Math.round(scrollDeltaAccumulator / 10);
+            if (scrollAmount !== 0) {
+                sendControlCommand({
+                    type: 'mouse_scroll',
+                    dy: scrollAmount
+                });
+            }
+            
+            scrollDeltaAccumulator = 0;
+            lastScrollTime = currentTime;
+        }
+        
+        // Send remaining scroll after user stops
+        clearTimeout(scrollEndTimer);
+        scrollEndTimer = setTimeout(() => {
+            if (scrollDeltaAccumulator !== 0) {
+                const scrollAmount = Math.round(scrollDeltaAccumulator / 10);
+                if (scrollAmount !== 0) {
+                    sendControlCommand({
+                        type: 'mouse_scroll',
+                        dy: scrollAmount
+                    });
+                }
+                scrollDeltaAccumulator = 0;
+            }
+        }, 100);
+    };
+    
+    // Add event listeners
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mousedown', handleMouseDown);
+    container.addEventListener('mouseup', handleMouseUp);
+    container.addEventListener('mouseleave', handleMouseLeave);
+    container.addEventListener('wheel', handleWheel);
+    
+    // Prevent context menu
+    container.addEventListener('contextmenu', (e) => e.preventDefault());
+    
+    // Return cleanup function
+    return () => {
+        container.removeEventListener('mousemove', handleMouseMove);
+        container.removeEventListener('mousedown', handleMouseDown);
+        container.removeEventListener('mouseup', handleMouseUp);
+        container.removeEventListener('mouseleave', handleMouseLeave);
+        container.removeEventListener('wheel', handleWheel);
+        container.removeEventListener('contextmenu', (e) => e.preventDefault());
+    };
+}
+
+// Unified keyboard event handler with proper arrow key support
+function setupKeyboardControlEvents(targetElement) {
+    if (!targetElement) return;
+    
+    const handleKeyDown = (e) => {
+        // Throttle key presses
+        const now = Date.now();
+        if (now - lastKeyPressTime < KEY_PRESS_THROTTLE) {
+            return;
+        }
+        lastKeyPressTime = now;
+        
+        // Avoid affecting browser's own shortcuts
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        
+        // Prevent default for most keys to avoid browser actions
+        // But allow some special keys that should work normally
+        if (e.key !== 'F5' && e.key !== 'F11' && e.key !== 'F12') {
+            e.preventDefault();
+        }
+        
+        // Handle special keys including arrow keys
+        let key = e.key;
+        if (key === ' ') key = 'space';
+        if (key === 'Enter') key = 'enter';
+        if (key === 'Backspace') key = 'backspace';
+        if (key === 'Tab') key = 'tab';
+        if (key === 'Escape') {
+            // Handle escape in fullscreen mode
+            if (document.fullscreenElement) {
+                exitAppFullscreen();
+                return;
+            }
+            key = 'escape';
+        }
+        
+        // Handle arrow keys
+        if (key === 'ArrowUp') key = 'up';
+        if (key === 'ArrowDown') key = 'down';
+        if (key === 'ArrowLeft') key = 'left';
+        if (key === 'ArrowRight') key = 'right';
+        
+        sendControlCommand({
+            type: 'key_press',
+            key: key
+        });
+    };
+    
+    // Add to both document and target element for better coverage
+    document.addEventListener('keydown', handleKeyDown);
+    if (targetElement !== document) {
+        targetElement.addEventListener('keydown', handleKeyDown);
+    }
+    
+    // Return cleanup function
+    return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+        if (targetElement !== document) {
+            targetElement.removeEventListener('keydown', handleKeyDown);
+        }
+    };
+}
+
+// Create control bar toggle triangle
+function createControlBarTriangle() {
+    // Remove any existing triangle
+    const existingTriangle = document.querySelector('.control-bar-toggle-triangle');
+    if (existingTriangle) {
+        existingTriangle.remove();
+    }
+    
+    const triangle = document.createElement('div');
+    triangle.className = 'control-bar-toggle-triangle';
+    triangle.title = '显示控制栏';
+    
+    triangle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showControlBar(); // Use the existing showControlBar function
+    });
+    
+    fullscreenContainer.appendChild(triangle);
+    return triangle;
+}
+
+
+function setupControlEvents() {
+    // Avoid adding event listeners multiple times
+    if (controlEventsAdded) {
+        console.log('[CONTROLS] Already set up, skipping');
+        return;
+    }
+    
+    console.log('[CONTROLS] Setting up control events for mode:', fallbackMode);
+    
+    // Get appropriate container based on mode
+    const container = (fallbackMode === 'webrtc') ? 
+        videoContainer : 
+        document.getElementById('remote-screen');
+    
+    if (!container) {
+        console.error('[CONTROLS] Container not found');
+        return;
+    }
+    
+    // Setup mouse controls
+    const removeMouseListeners = setupMouseControlEvents(container);
+    
+    // Setup keyboard controls using unified handler
+    const removeKeyboardListeners = setupKeyboardControlEvents(
+        fullscreenContainer || document.getElementById('video-container') || document
+    );
+    
+    // Setup control bar
+    const controlBar = setupControlBar(fullscreenContainer || document.getElementById('video-container'));
+    
+    // Setup control bar toggle for fullscreen mode
+    if (fullscreenContainer) {
+        createControlBarTriangle();
+        hideControlBar();
+    }
+    
+    controlEventsAdded = true;
+    
+    // Store cleanup functions
+    window.cleanupControlEvents = () => {
+        if (removeMouseListeners) removeMouseListeners();
+        if (removeKeyboardListeners) removeKeyboardListeners();
+        hideControlBar();
+    };
+    
+    console.log('[CONTROLS] Control events setup completed');
+}
+
+
+
+function disconnect() {
+    console.log('[DISCONNECT] === Starting Disconnect Process ===');
+     
+    // Clean up control event listeners
+    if (window.cleanupFullscreenMouseControls) {
+        window.cleanupFullscreenMouseControls();
+        window.cleanupFullscreenMouseControls = null;
+    }
+    
+    if (window.cleanupRegularMouseControls) {
+        window.cleanupRegularMouseControls();
+        window.cleanupRegularMouseControls = null;
+    }
+    // Use unified cleanup if available
+    if (window.cleanupControlEvents) {
+        window.cleanupControlEvents();
+        window.cleanupControlEvents = null;
+    }
+    // Stop consistency monitoring first
+    stopConsistencyMonitoring();
+    
+    // Cleanup media resources
+    cleanupMediaResources();
+
+    isCleaningUp = true;
+    
+    // Log current state
+    console.log('[DISCONNECT] Current intervals:');
+    console.log('[DISCONNECT]  - window.screenUpdateTimer:', !!window.screenUpdateTimer);
+    console.log('[DISCONNECT]  - window.commandPollingTimer:', !!window.commandPollingTimer);
+    console.log('[DISCONNECT]  - screenUpdateInterval (legacy):', !!screenUpdateInterval);
+    
+    isControlBarVisible = false;
+
+    // Clear all possible intervals
+    if (window.screenUpdateTimer) {
+        console.log('[DISCONNECT] Clearing window.screenUpdateTimer');
+        clearInterval(window.screenUpdateTimer);
+        window.screenUpdateTimer = null;
+    }
+    
+    if (window.commandPollingTimer) {
+        console.log('[DISCONNECT] Clearing window.commandPollingTimer');
+        clearInterval(window.commandPollingTimer);
+        window.commandPollingTimer = null;
+    }
+    
+    if (screenUpdateInterval) {
+        console.log('[DISCONNECT] Clearing legacy screenUpdateInterval');
+        clearInterval(screenUpdateInterval);
+        screenUpdateInterval = null;
+    }
+    
+    // Clean up object URLs to prevent memory leaks
+    const img = document.getElementById('remote-screen');
+    if (img) {
+        console.log('[DISCONNECT] Image element found');
+        if (img._currentUrl) {
+            console.log('[DISCONNECT] Revoking object URL');
+            URL.revokeObjectURL(img._currentUrl);
+            img._currentUrl = null;
+        }
+        console.log('[DISCONNECT] Clearing image source');
+        img.src = '';
+    } else {
+        console.log('[DISCONNECT] Image element NOT found');
+    }
+    
+    // Clean up WebRTC
+    console.log('[DISCONNECT] Disconnecting WebRTC');
+    disconnectWebRTC();
+    
+    // Clean up HTTP session
+    console.log('[DISCONNECT] Clearing session ID');
+    sessionId = null;
+    
+    // Reset UI elements
+    const video = getVideoElement();
+    if (video && video.srcObject) {
+        console.log('[DISCONNECT] Clearing video source');
+        video.srcObject = null;
+    }    
+    currentStream = null; // Clear global reference
+    
+    isConnected = false;
+    fallbackMode = 'webrtc';
+    commandQueue = [];
+    controlEventsAdded = false;
+    
+    console.log('[DISCONNECT] Removing event listeners');
+
+    // Clean up control event listeners
+    if (window.cleanupFullscreenMouseControls) {
+        window.cleanupFullscreenMouseControls();
+        window.cleanupFullscreenMouseControls = null;
+    }
+    
+    if (window.cleanupRegularMouseControls) {
+        window.cleanupRegularMouseControls();
+        window.cleanupRegularMouseControls = null;
+    }
+    
+    console.log('[DISCONNECT] Removing event listeners');
+    // Remove event listeners
+    document.removeEventListener('keydown', exitFullscreenOnEscape);
+    
+    // Exit fullscreen if we're in it
+    if (document.fullscreenElement) {
+        console.log('[DISCONNECT] Exiting fullscreen');
+        try {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        } catch (e) {
+            console.error('[DISCONNECT] Error exiting fullscreen:', e);
+        }
+    }
+    
+    console.log('[DISCONNECT] === Disconnect Process Completed ===');
+
+    setTimeout(() => {
+        isCleaningUp = false;
+    }, 100);
+
+    console.log('[DISCONNECT] Disconnect process completed');
+}
+
+
+connectBtn.addEventListener('click', async () => {
+    const password = passwordInput.value.trim();
+    if (!password) {
+        showStatus('请输入密码', 'error');
+        return;
+    }
+
+    try {
+        showStatus('正在建立连接...', 'info');
+        await startConnection(password);
+        showStatus('连接成功', 'success');
+        
+        // Switch to control interface
+        connectionPanel.classList.add('hidden');
+        controlInterface.classList.remove('hidden');
+        isConnected = true;
+        
+        // For HTTP mode, setup controls and make container full window size
+        if (fallbackMode === 'http') {
+            setupControlEvents(); // Use unified setup
+            startHTTPScreenUpdates();
+            
+            // Make video container fill window without fullscreen API
+            makeContainerFullWindow();
+            
+            // Hide loading indicator for HTTP mode
+            if (loadingIndicator) {
+                loadingIndicator.classList.add('hidden');
+            }
+            // Initialize control bar toggle for HTTP mode
+            setTimeout(() => {
+                initControlBarToggle();
+                hideControlBar();
+                if (controlBarToggleBtn) {
+                    controlBarToggleBtn.classList.remove('hidden');
+                }
+            }, 100);
+        } else {
+            // For WebRTC, setup controls and hide loading indicator
+            if (loadingIndicator) {
+                loadingIndicator.classList.add('hidden');
+            }
+            
+            // Make video container fill window without fullscreen API
+            makeContainerFullWindow();
+            
+            // Setup controls using unified function
+            setupControlEvents();
+            hideControlBar();
+        }
+        
+    } catch (error) {
+        showStatus(`连接失败: ${error.message}`, 'error');
+        disconnect();
+    }
+});
+
+// Setup control bar - use existing HTML control bar
+function setupControlBar(container) {
+    if (!container) return;
+    
+    // Use the existing control bar from HTML
+    const controlBar = document.getElementById('control-bar');
+    if (!controlBar) {
+        console.error('[CONTROLS] Existing control bar not found');
+        return;
+    }
+    
+    // Make sure the control bar is properly positioned
+    controlBar.style.position = 'absolute';
+    controlBar.style.top = '0';
+    controlBar.style.left = '0';
+    controlBar.style.right = '0';
+    controlBar.style.zIndex = '10';
+    
+    // Add close button if it doesn't exist
+    const buttonContainer = controlBar.querySelector('.flex.flex-wrap.gap-2');
+    if (buttonContainer) {
+        // Check if close button already exists
+        const closeButton = document.getElementById('control-bar-close');
+        if (!closeButton) {
+            const closeBtn = document.createElement('button');
+            closeBtn.id = 'control-bar-close';
+            closeBtn.className = 'bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded transition-all';
+            closeBtn.innerHTML = '<i class="fa fa-times mr-1"></i>关闭';
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideControlBar();
+            });
+            buttonContainer.appendChild(closeBtn);
+        }
+    }
+    
+    // Initially hide control bar
+    hideControlBar();
+    
+    return controlBar;
+}
+
+
+
+function makeContainerFullWindow() {
+    if (!fullscreenContainer) return;
+    
+    // Add styles to make container fill window
+    fullscreenContainer.style.position = 'fixed';
+    fullscreenContainer.style.top = '0';
+    fullscreenContainer.style.left = '0';
+    fullscreenContainer.style.width = '100vw';
+    fullscreenContainer.style.height = '100vh';
+    fullscreenContainer.style.zIndex = '10000';
+    fullscreenContainer.setAttribute('data-fullwindow', 'true');
+    
+    // Create and show the triangle toggle
+    createControlBarTriangle();
+    
+    // Hide control bar by default (will be shown when triangle is clicked)
+    hideControlBar();
+}
+
+
+disconnectBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent event bubbling
+    
+    // Send disconnect command to backend
+    sendControlCommand({
+        type: 'disconnect'
+    });
+    
+    // Exit full window mode
+    exitAppFullscreen();
+    
+    // Show connection panel again
+    controlInterface.classList.add('hidden');
+    connectionPanel.classList.remove('hidden');
+    
+    showStatus('已断开连接', 'info');
+});
+
+
+function exitAppFullscreen() {
+    // Remove full window styles
+    if (fullscreenContainer) {
+        fullscreenContainer.style.position = '';
+        fullscreenContainer.style.top = '';
+        fullscreenContainer.style.left = '';
+        fullscreenContainer.style.width = '';
+        fullscreenContainer.style.height = '';
+        fullscreenContainer.style.zIndex = '';
+        fullscreenContainer.removeAttribute('data-fullwindow');
+    }
+    
+    // Remove triangle toggle
+    const triangle = document.querySelector('.control-bar-toggle-triangle');
+    if (triangle) {
+        triangle.remove();
+    }
+    // Remove event listener
+    document.removeEventListener('keydown', exitFullscreenOnEscape);
+    
+    // Hide control bar
+    hideControlBar();
+    
+    // Exit our app fullscreen mode
+    if (!controlInterface.classList.contains('hidden')) {
+        controlInterface.classList.add('hidden');
+    }
+    
+    // Show connection panel again
+    connectionPanel.classList.remove('hidden');
+}
+
+
+screenOffBtn.addEventListener('click', () => {
+    sendControlCommand({
+        type: 'screen_control',
+        action: 'off'
+    });
+    showStatus('发送关闭屏幕指令', 'info');
+});
+
+screenOnBtn.addEventListener('click', () => {
+    sendControlCommand({
+        type: 'screen_control',
+        action: 'on'
+    });
+    showStatus('发送打开屏幕指令', 'info');
+});
+
+lockScreenBtn.addEventListener('click', () => {
+    sendControlCommand({
+        type: 'lock_screen'
+    });
+    showStatus('发送锁定屏幕指令', 'info');
+});
+
+
+
+async function startConnection(password) {
+    console.log('[CONNECTION] Starting connection process');
+    
+    try {
+        // First try WebRTC (now the priority)
+        console.log('[CONNECTION] Attempting WebRTC connection');
+        await establishWebRTCConnection(password);
+        activeMode = 'webrtc'; // Set only when successful
+        console.log('[CONNECTION] WebRTC connection successful');
+        showStatus('WebRTC连接成功', 'success');
+    } catch (webRTCError) {
+        console.warn('[CONNECTION] WebRTC连接失败，尝试HTTP方案:', webRTCError);
+        showStatus('WebRTC连接失败，切换到HTTP模式...', 'warning');
+        
+        try {
+            // Try HTTP as fallback
+            console.log('[CONNECTION] Attempting HTTP connection');
+            await establishHTTPSession(password);
+            activeMode = 'http'; // Set only when successful
+            console.log('[CONNECTION] HTTP connection successful');
+            showStatus('已启用HTTP连接', 'success');
+        } catch (httpError) {
+            console.error('[CONNECTION] 所有连接方式都失败:', httpError);
+            throw new Error('无法建立任何类型的连接');
+        }
+    }
+}
+
+// WebRTC connection - reduced logging
+async function establishWebRTCConnection(password) {
+    // Clean up any existing connections
+    disconnectWebRTC();
+    
+    // Create PeerConnection
+    pc = new RTCPeerConnection({
+        iceServers: [
+            {
+                urls: 'stun:stun.l.google.com:19302'
+            }
+        ]
+    });
+
+    // Create data channel BEFORE creating offer (as backend expects)
+    dataChannel = pc.createDataChannel('control-channel', {
+        ordered: true,
+        maxPacketLifeTime: 100  // 100ms max packet life
+        // maxRetransmits: 0  // Remove this line  用这一行来产生一个webrtc错误
+    });
+    setupDataChannelEvents(dataChannel);
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            const candidateData = {
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex
+            };
+
+            fetch('/ice-candidate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(candidateData)
+            }).catch(err => console.error('[WEBRTC] 发送ICE候选者失败:', err));
+
+            console.log('[WEBRTC] Sending ICE candidate:', {
+                candidate: event.candidate.candidate.substring(0, 100) + '...',
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex
+            });
+        }else {
+            console.log('[WEBRTC] ICE gathering completed');
+        }
+    };
+
+ 
+    pc.onconnectionstatechange = () => {
+        console.log('[WEBRTC] === Connection state changed ===', pc.connectionState);
+        switch(pc.connectionState) {
+            case 'new':
+                console.log('[WEBRTC] Connection is new');
+                break;
+            case 'connecting':
+                console.log('[WEBRTC] Connection is connecting');
+                break;
+            case 'connected':
+                console.log('[WEBRTC] === Connection established ===');
+                showStatus('WebRTC连接成功', 'success');
+                break;
+            case 'disconnected':
+                console.log('[WEBRTC] Connection disconnected');
+                showStatus('WebRTC连接断开', 'warning');
+                break;
+            case 'failed':
+                console.log('[WEBRTC] === Connection failed ===');
+                showStatus('WebRTC连接失败', 'error');
+                if (!isRetrying) {
+                    isRetrying = true;
+                    setTimeout(() => establishWebRTCConnection(password), 3000); // 3秒后重试
+                    }
+                break;
+            case 'closed':
+                console.log('[WEBRTC] Connection closed');
+                break;
+            default:
+                console.log('[WEBRTC] Unknown connection state:', pc.connectionState);
+        }
+    };
+
+    pc.onsignalingstatechange = () => {
+        console.log('[WEBRTC] === Signaling state changed ===', pc.signalingState);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        console.log('[WEBRTC] === ICE connection state changed ===', pc.iceConnectionState);
+        switch(pc.iceConnectionState) {
+            case 'new':
+                console.log('[WEBRTC] ICE connection is new');
+                break;
+            case 'checking':
+                console.log('[WEBRTC] ICE connection is checking');
+                break;
+            case 'connected':
+                console.log('[WEBRTC] === ICE connection established ===');
+                break;
+            case 'completed':
+                console.log('[WEBRTC] ICE connection completed');
+                break;
+            case 'failed':
+                console.log('[WEBRTC] === ICE connection failed ===');
+                showStatus('WebRTC ICE连接失败', 'error');
+                break;
+            case 'disconnected':
+                console.log('[WEBRTC] ICE connection disconnected');
+                showStatus('WebRTC ICE连接断开', 'warning');
+                break;
+            case 'closed':
+                console.log('[WEBRTC] ICE connection closed');
+                break;
+            default:
+                console.log('[WEBRTC] Unknown ICE state:', pc.iceConnectionState);
+        }
+    };
+
+
+    // Add transceiver for video BEFORE creating offer
+    try {
+        console.log('[WEBRTC] Adding video transceiver');
+        const videoTransceiver = pc.addTransceiver('video', { direction: 'recvonly' });
+        console.log('[WEBRTC] Video transceiver added:', {
+            mid: videoTransceiver.mid,
+            direction: videoTransceiver.direction,
+            currentDirection: videoTransceiver.currentDirection
+        });
+    } catch (e) {
+        console.error('[WEBRTC] Failed to add video transceiver:', e);
+    }
+
+
+    pc.ontrack = function(event) {
+        console.log('[WEBRTC] === Track Event Received ===');
+        console.log('[WEBRTC] Track details:', {
+            kind: event.track.kind,
+            id: event.track.id,
+            label: event.track.label,
+            readyState: event.track.readyState
+        });
+        
+        // Only handle video tracks
+        if (event.track.kind !== 'video') {
+            return;
+        }
+        
+        const video = getVideoElement();
+        if (!video) {
+            console.error('[WEBRTC] Remote video element not found');
+            return;
+        }
+        
+        // Get the stream from the event
+        const stream = event.streams[0];
+        if (!stream) {
+            console.error('[WEBRTC] No stream found in track event');
+            return;
+        }
+        
+        console.log('[WEBRTC] Processing stream:', {
+            streamId: stream.id,
+            trackCount: stream.getTracks().length
+        });
+        
+        // Register the track first
+        registerTrack(event.track);
+        
+        // Set the stream to video element with enhanced error handling
+        try {
+            console.log('[WEBRTC] Setting stream to video element');
+            const success = setVideoSrcObject(video, stream);
+            if (success) {
+                currentStream = stream; // Set the current stream reference
+                console.log('[WEBRTC] Stream set successfully');
+                
+                // Start consistency monitoring after successful setup
+                // startConsistencyMonitoring();
+                
+                // Setup state change detection
+                setupStateChangeDetection();
+                
+                // 100ms verification
+                setTimeout(() => {
+                    console.log('[WEBRTC-DEBUG] srcObject verification 100ms after setting:', {
+                        hasSrcObject: !!video.srcObject,
+                        boundStreamId: video.srcObject?.id,
+                        boundTrackCount: video.srcObject?.getTracks().length
+                    });
+                    
+                    // Verify state consistency
+                    const state = checkStateConsistency();
+                    console.log('[WEBRTC-DEBUG] State consistency check:', state);
+                }, 100);
+            } else {
+                console.error('[WEBRTC] Failed to set stream to video element');
+                showStatus('视频流设置失败', 'error');
+            }
+        } catch (error) {
+            console.error('[WEBRTC] Failed to set stream to video:', error);
+            showStatus('视频流设置失败', 'error');
+            return;
+        }
+    };
+
+
+    function getVideoDimensions(video) {
+        // Try multiple methods to get dimensions
+        const width = video.videoWidth || 
+                    video.clientWidth || 
+                    video.offsetWidth || 
+                    video.scrollWidth ||
+                    (video.getBoundingClientRect ? video.getBoundingClientRect().width : 0);
+                    
+        const height = video.videoHeight || 
+                    video.clientHeight || 
+                    video.offsetHeight || 
+                    video.scrollHeight ||
+                    (video.getBoundingClientRect ? video.getBoundingClientRect().height : 0);
+                    
+        return { width, height };
+    }
+
+
+    // Add this new function to properly size the video element:
+    function applyVideoSizing(video) {
+        // Clear any pending sizing operation
+        if (videoSizingTimeout) {
+            clearTimeout(videoSizingTimeout);
+        }
+        
+        // Delay the sizing operation slightly to handle rapid successive calls
+        videoSizingTimeout = setTimeout(() => {
+            // Actual sizing implementation here
+            performVideoSizing(video);
+        }, 10);
+    }
+
+
+    function performVideoSizing(video) {
+        if (!video || !video.videoWidth || !video.videoHeight) {
+            console.log('[WEBRTC] Video dimensions not available yet');
+            return;
+        }
+        
+        // Check if sizing has already been applied properly
+        const container = document.getElementById('video-container');
+        if (video.style.objectFit === 'contain' && 
+            video.style.maxWidth === '100%' && 
+            container && container.style.display === 'flex') {
+            // Already properly sized, skip redundant operations
+            return;
+        }
+
+
+        if (!video || !video.videoWidth || !video.videoHeight) {
+            console.log('[WEBRTC] Video dimensions not available yet');
+            return;
+        }
+        
+        console.log(`[WEBRTC] Applying sizing for ${video.videoWidth}x${video.videoHeight} video`);
+        
+        // Remove any fixed sizing that might be constraining the video
+        video.style.width = '';
+        video.style.height = '';
+        video.style.maxWidth = '100%';
+        video.style.maxHeight = '100%';
+        
+        // Ensure the video can size to its natural dimensions
+        video.style.objectFit = 'contain';
+        
+
+        if (container) {
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.justifyContent = 'center';
+        }
+        
+        console.log('[WEBRTC] Video sizing applied:', {
+        // Instead of using offsetWidth/offsetHeight which can be 0
+            elementWidth: video.videoWidth || video.clientWidth || video.offsetWidth,
+            elementHeight: video.videoHeight || video.clientHeight || video.offsetHeight,
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight
+        });
+
+        // Add this to specifically log #remoteVideo dimensions:
+        const remoteVideo = document.getElementById('remoteVideo');
+        if (remoteVideo) {
+            console.log('[WEBRTC] #remoteVideo dimensions:', {
+                offsetWidth: remoteVideo.offsetWidth,
+                offsetHeight: remoteVideo.offsetHeight,
+                clientWidth: remoteVideo.clientWidth,
+                clientHeight: remoteVideo.clientHeight,
+                videoWidth: remoteVideo.videoWidth,
+                videoHeight: remoteVideo.videoHeight
+            });
+        }
+
+        const dimensions = getVideoDimensions(remoteVideo);
+        console.log('[WEBRTC] remoteVideo dimensions:', {
+            elementWidth: dimensions.width,
+            elementHeight: dimensions.height,
+            videoWidth: remoteVideo.videoWidth,
+            videoHeight: remoteVideo.videoHeight
+        });
+
+
+    }
+
+    //  the error handling part:
+    try {
+        // Wait a moment for the data channel to be ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        // Create offer WITH data channel (backend expects this)
+        const offer = await pc.createOffer({
+            offerToReceiveVideo: true,
+            offerToReceiveAudio: false
+        });
+
+        await pc.setLocalDescription(offer);
+
+        // Wait a moment for the local description to be set and transceivers to initialize
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Log transceivers after local description is set
+        const transceivers = pc.getTransceivers();
+        console.log('[WEBRTC] Transceivers after local description set:', transceivers.map(t => ({
+            kind: t.kind,
+            direction: t.direction,
+            currentDirection: t.currentDirection,
+            mid: t.mid
+        })));
+
+        // Send offer to controlled end
+        const response = await fetch('/offer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sdp: pc.localDescription.sdp,
+                type: pc.localDescription.type,
+                password: password
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            let errorData;
+            try {
+                errorData = JSON.parse(errorText);
+            } catch (e) {
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            throw new Error(errorData.error || `HTTP ${response.status}: 连接请求被拒绝`);
+        }
+
+
+        // Handle lockout period
+        if (response.status === 429) {
+            const retryAfter = errorData.retry_after || 300;
+            showStatus(`密码尝试次数过多，请 ${retryAfter} 秒后再试`, 'error');
+            // Disable the connect button for the lockout period
+            connectBtn.disabled = true;
+            setTimeout(() => {
+                connectBtn.disabled = false;
+                showStatus('现在可以重新尝试连接', 'info');
+            }, retryAfter * 1000);
+            throw new Error(`密码尝试次数过多，请 ${retryAfter} 秒后再试`);
+        }
+
+        const answerData = await response.json();
+        // Validate answer data
+        if (!answerData.sdp || !answerData.type) {
+            throw new Error('无效的answer数据');
+        }
+        
+        const answer = new RTCSessionDescription({
+            type: 'answer',
+            sdp: answerData.sdp
+        });
+        await pc.setRemoteDescription(answer);
+    
+        // After setting remote description, add this:
+        console.log('[WEBRTC] Remote description set, checking for video transceiver');
+        const transceiversAfter = pc.getTransceivers();
+        transceiversAfter.forEach((t, i) => {
+            console.log(`[WEBRTC] Transceiver ${i}:`, {
+                kind: t.kind,
+                direction: t.direction,
+                currentDirection: t.currentDirection,
+                mid: t.mid
+            });
+        });
+        
+        //Check for video transceiver
+        await new Promise((resolve, reject) => {
+            let timeoutId = setTimeout(() => {
+                console.error('[WEBRTC] Connection timeout after 10 seconds');
+                reject(new Error('WebRTC连接超时'));
+            }, 30000); // 10 second timeout
+            
+            // If data channel is already open
+            if (dataChannel && dataChannel.readyState === 'open') {
+                console.log('[WEBRTC] Data channel already open');
+                clearTimeout(timeoutId);
+                showStatus('WebRTC连接成功，可进行远程控制', 'success');
+                sendControlCommand({
+                    type: 'request_screen_info'
+                });
+                try {
+                    setupControlEvents();
+                } catch (e) {
+                    console.error('Error setting up control events:', e);
+                }
+                flushCommandQueue();
+                resolve();
+                return;
+            }
+            
+            // Listen for data channel open event
+            if (dataChannel) {
+                const openHandler = () => {
+                    console.log('[WEBRTC] Data channel opened successfully');
+                    clearTimeout(timeoutId); // Use timeoutId (NOT timeout)
+                    showStatus('WebRTC连接成功，可进行远程控制', 'success');
+                    sendControlCommand({
+                        type: 'request_screen_info'
+                    });
+                    
+                    // Setup control events
+                    try {
+                        setupControlEvents();
+                        // Start checking for scrollbar elements
+                    } catch (e) {
+                        console.error('[WEBRTC] Error setting up control events:', e);
+                    }
+                    
+                    flushCommandQueue();
+                    resolve();
+                };
+                
+                const errorHandler = (error) => {
+                    console.error('[WEBRTC] Data channel error:', error);
+                    clearTimeout(timeoutId); // Use timeoutId (NOT timeout)
+                    dataChannel.removeEventListener('open', openHandler);
+                    dataChannel.removeEventListener('error', errorHandler);
+                    reject(new Error('数据通道错误: ' + error.message));
+                };
+                
+                dataChannel.addEventListener('open', openHandler);
+                dataChannel.addEventListener('error', errorHandler);
+            }
+        });
+        
+        
+    } catch (error) {
+        console.error('[WEBRTC] Connection failed:', error);
+        disconnectWebRTC();
+        throw error;
+    }
+}
+
+
+
+// HTTP session fallback
+async function establishHTTPSession(password) {
+    console.log('[SESSION] Establishing HTTP session');
+    
+    // Clean up any existing WebRTC connection
+    console.log('[SESSION] Disconnecting any existing WebRTC connection');
+    disconnectWebRTC();
+    
+    try {
+        // Create session
+        console.log('[SESSION] Creating new session');
+        const sessionResponse = await fetch('/session/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        
+        console.log(`[SESSION] Session creation response status: ${sessionResponse.status}`);
+        
+        if (!sessionResponse.ok) {
+            const error = await sessionResponse.json();
+            console.error('[SESSION] Session creation failed:', error);
+            
+            // Handle lockout period
+            if (sessionResponse.status === 429) {
+                const retryAfter = error.retry_after || 300;
+                showStatus(`密码尝试次数过多，请 ${retryAfter} 秒后再试`, 'error');
+                // Disable the connect button for the lockout period
+                connectBtn.disabled = true;
+                setTimeout(() => {
+                    connectBtn.disabled = false;
+                    showStatus('现在可以重新尝试连接', 'info');
+                }, retryAfter * 1000);
+                throw new Error(`密码尝试次数过多，请 ${retryAfter} 秒后再试`);
+            }
+            
+            throw new Error(error.error || '无法创建会话');
+        }
+        
+        const sessionData = await sessionResponse.json();
+        sessionId = sessionData.session_id;
+        console.log(`[SESSION] Session created with ID: ${sessionId}`);
+
+        // Set the mode BEFORE setting up controls
+        fallbackMode = 'http';  // Add this line here
+
+        // Add this line to indicate HTTP control is being used
+        console.log('[PROTOCOL] Control channel: HTTP');
+        
+        // Start polling for commands (for acknowledgments)
+        console.log('[SESSION] Starting command polling');
+        startCommandPolling();
+            
+        // Setup control events for HTTP mode
+        console.log('[SESSION] Setting up control events');
+        setupControlEvents();
+        
+        // Start screen updates immediately after session establishment
+        console.log('[SESSION] Starting HTTP screen updates');
+        startHTTPScreenUpdates();
+
+        console.log('[SESSION] HTTP session established successfully');
+        return sessionId;
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            showStatus(`连接失败: ${error.message}`, 'error');
+        }
+        throw error;
+    }    
+}
+
+
+function verifyVideoStream() {
+    const video = getVideoElement(); // Use consistent method
+    if (video) {
+        console.log('[WEBRTC] Video stream verification:', {
+            hasSrcObject: !!video.srcObject, // Use the same reference consistently
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            readyState: video.readyState,
+            networkState: video.networkState,
+            currentTime: video.currentTime
+        });
+        
+        if (video.srcObject) {
+            const tracks = video.srcObject.getVideoTracks();
+            console.log('[WEBRTC] Video tracks verification:', tracks.map(t => ({
+                id: t.id,
+                kind: t.kind,
+                readyState: t.readyState,
+                enabled: t.enabled
+            })));
+        }
+    }
+}
+
+function setupVideoMonitoring() {
+    const video = getVideoElement();
+    if (!video) return;
+    
+    // Monitor for DOM changes that might affect the video element
+    const parentObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.removedNodes.forEach((node) => {
+                if (node.id === 'remoteVideo') {
+                    console.error(`[WEBRTC-DEBUG] DOM WARNING - #remoteVideo removed from DOM!`, {
+                        time: new Date().toLocaleTimeString(),
+                        parent: mutation.target.tagName
+                    });
+                }
+            });
+            
+            mutation.addedNodes.forEach((node) => {
+                if (node.tagName === 'VIDEO' && node.id === 'remoteVideo') {
+                    console.log(`[WEBRTC-DEBUG] New #remoteVideo element added to DOM`, {
+                        time: new Date().toLocaleTimeString()
+                    });
+                }
+            });
+        });
+    });
+    
+    parentObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // Monitor srcObject attribute changes
+    const srcObjectObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.attributeName === 'srcObject') {
+                const video = getVideoElement();
+                if (video) {
+                    console.log(`[WEBRTC-DEBUG] srcObject attribute changed:`, {
+                        hasSrcObject: !!video.srcObject,
+                        streamId: video.srcObject ? video.srcObject.id : 'null',
+                        trackCount: video.srcObject ? video.srcObject.getTracks().length : 0
+                    });
+                }
+            }
+        });
+    });
+    
+    srcObjectObserver.observe(video, { 
+        attributes: true, 
+        attributeFilter: ['srcObject'] 
+    });
+    
+    return { parentObserver, srcObjectObserver };
+}
+
+
+async function handleWebRTCFailure() {
+    if (fallbackMode === 'webrtc') {
+        showStatus('WebRTC连接暂时中断，尝试重新连接...', 'warning');
+        try {
+            // First try to re-establish WebRTC connection
+            await establishWebRTCConnection(passwordInput.value.trim());
+            fallbackMode = 'webrtc';
+            showStatus('WebRTC连接已恢复', 'success');
+            return;
+        } catch (e) {
+            console.warn('WebRTC reconnection failed:', e);
+        }
+        
+        // Only fallback to HTTP if WebRTC consistently fails
+        showStatus('WebRTC连接失败，切换到HTTP模式...', 'warning');
+        try {
+            await establishHTTPSession(passwordInput.value.trim());
+            fallbackMode = 'http';
+            showStatus('已切换到HTTP备用模式', 'success');
+        } catch (e) {
+            showStatus('HTTP连接也失败: ' + e.message, 'error');
+        }
+    }
+}
+
+function sendControlCommand(command) {
+    // If we have a current data channel function, use it
+    if (window.currentSendControlCommand) {
+        window.currentSendControlCommand(command);
+        return;
+    }
+    
+    // Fallback to original logic
+    if (fallbackMode === 'webrtc' && dataChannel && dataChannel.readyState === 'open') {
+        try {
+            const cmdStr = JSON.stringify(command);
+            dataChannel.send(cmdStr);
+            // console.log('通过WebRTC发送指令:', cmdStr);
+        } catch (e) {
+            console.error('WebRTC发送失败:', e);
+            showStatus('WebRTC发送失败', 'warning');
+            // Switch to HTTP immediately only for critical commands
+            if (command.type !== 'mouse_move') {
+                switchToHTTPFallback(command);
+            }
+        }
+    } else if (fallbackMode === 'http' && sessionId) {
+        // Mouse move commands are too frequent for HTTP, skip them
+        if (command.type == 'mouse_move') {
+            // Throttle mouse movements for HTTP mode
+            const now = Date.now();
+            if (now - lastMouseMoveTime < MOUSE_MOVE_THROTTLE) {
+                lastMouseMoveTime = now;
+                fallbackToHTTPCommand(command);
+            }
+            // Drop mouse moves that are too frequent
+        } else {
+            // Send all other commands immediately
+            fallbackToHTTPCommand(command);
+        }
+    } else {
+        // Only queue non-mouse-move commands
+        if (command.type !== 'mouse_move') {
+            commandQueue.push(command);
+            console.log('指令已排队:', command);
+            showStatus('正在建立连接...', 'info');
+        }
+    }
+}
+
+// Switch to HTTP fallback immediately
+async function switchToHTTPFallback(command) {
+    if (!sessionId) {
+        try {
+            await establishHTTPSession(passwordInput.value.trim());
+            fallbackMode = 'http';
+            showStatus('已切换到HTTP模式', 'success');
+        } catch (e) {
+            showStatus('无法切换到HTTP模式: ' + e.message, 'error');
+            return;
+        }
+    }
+    
+    // Send the command that failed
+    fallbackToHTTPCommand(command);
+    
+    // Flush any queued commands
+    flushCommandQueue();
+}
+
+// HTTP command fallback
+async function fallbackToHTTPCommand(command) {
+    if (!sessionId) {
+        console.error('没有有效的会话ID');
+        showStatus('未建立HTTP会话', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/command/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                command: command
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('HTTP命令发送失败: ' + response.status);
+        }
+        
+        // console.log('通过HTTP发送指令:', command);
+    } catch (error) {
+        console.error('HTTP命令发送失败:', error);
+        showStatus('命令发送失败: ' + error.message, 'error');
+    }
+}
+
+// Flush command queue when connection is restored
+function flushCommandQueue() {
+    while (commandQueue.length > 0) {
+        const command = commandQueue.shift();
+        sendControlCommand(command);
+    }
+}
+
+// Clean up WebRTC connection (synchronous version)
+function disconnectWebRTC() {
+    if (dataChannel) {
+        try {
+            dataChannel.close();
+        } catch (e) {
+            console.error('关闭数据通道失败:', e);
+        }
+        dataChannel = null;
+    }
+    
+    if (pc) {
+        try {
+            pc.close();
+        } catch (e) {
+            console.error('关闭PeerConnection失败:', e);
+        }
+        pc = null;
+    }
+}
+
+
+function setupDataChannelEvents(channel) {
+    if (!channel) {
+        console.error('Cannot setup events for undefined channel');
+        return;
+    }
+    
+    // Move messageBuffer declaration to the outer scope
+    let messageBuffer = [];
+
+    const openHandler = () => {
+        console.log('数据通道打开');
+        showStatus('WebRTC连接成功，可进行远程控制', 'success');
+
+        // Hide loading indicator
+        if (loadingIndicator) {
+            loadingIndicator.classList.add('hidden');
+        }
+
+        // Request screen info immediately after connection
+        sendControlCommand({
+            type: 'request_screen_info'
+        });
+    };
+    
+    const messageHandler = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            // console.log('收到被控端回复:', data);
+            // Handle acknowledgment messages
+            if (data.type === 'ack') {
+                // console.log('指令确认:', data.command);
+            } else if (data.type === 'screen_info') {
+                // Store actual screen information for coordinate mapping
+                window.controlledScreen = {
+                    width: data.width,
+                    height: data.height
+                };
+                console.log('收到被控端屏幕尺寸:', data.width, 'x', data.height);
+            }
+        } catch (err) {
+            console.log('收到被控端消息:', e.data);
+        }
+    };
+    
+    const errorHandler = (err) => {
+        console.error('数据通道错误:', err);
+        showStatus('控制通道错误，尝试切换到HTTP', 'error');
+
+        // Add a slight delay before switching to let any pending operations complete
+        setTimeout(() => {
+            switchToHTTPMode(passwordInput.value.trim());
+        }, 100);
+    };
+    
+    const closeHandler = () => {
+        console.log('数据通道已关闭');
+        showStatus('数据通道已关闭', 'info');
+        // Clean up event listeners
+        if (channel) {
+            channel.removeEventListener('open', openHandler);
+            channel.removeEventListener('message', messageHandler);
+            channel.removeEventListener('error', errorHandler);
+            channel.removeEventListener('close', closeHandler);
+        }
+    };
+    
+    // Add event listeners
+    channel.addEventListener('open', openHandler);
+    channel.addEventListener('message', messageHandler);
+    channel.addEventListener('error', errorHandler);
+    channel.addEventListener('close', closeHandler);
+
+    // Log initial state
+    console.log('Data channel initial state:', channel.readyState);
+}
+
+
+// 显示状态信息
+function showStatus(message, type = 'info') {
+    if (!statusElement) return;
+    
+    statusElement.textContent = message;
+    
+    // 设置状态样式
+    statusElement.className = 'py-2 text-center';
+    if (type === 'error') {
+        statusElement.classList.add('text-red-500');
+    } else if (type === 'success') {
+        statusElement.classList.add('text-green-500');
+    } else if (type === 'warning') {
+        statusElement.classList.add('text-yellow-500');
+    } else {
+        statusElement.classList.add('text-gray-600');
+    }
+}
+
+
+// 显示屏幕显示范围，主要在调试时使用。函数参数是鼠标位置。
+function showCoordinateOverlay(clientX, clientY) {
+    // Remove any existing coordinate overlays
+    const existingOverlays = document.querySelectorAll('.coordinate-overlay');
+    existingOverlays.forEach(overlay => overlay.remove());
+    
+    const videoContainer = document.getElementById('video-container');
+    if (!videoContainer) return;
+    
+    const containerRect = videoContainer.getBoundingClientRect();
+    
+    // Get the actual content element (video or image)
+    const contentElement = getContentElement();
+    if (!contentElement) return;
+    
+    let renderedWidth, renderedHeight, renderedLeft, renderedTop;
+    
+    // Calculate the rendered area based on the same logic as mapCoordinates
+    if (contentElement.tagName === 'IMG' && contentElement.classList.contains('fullscreen-cover')) {
+        // Get natural image dimensions
+        const naturalWidth = contentElement.naturalWidth || (window.controlledScreen?.width) || 1920;
+        const naturalHeight = contentElement.naturalHeight || (window.controlledScreen?.height) || 1080;
+        
+        // Calculate aspect ratios
+        const naturalRatio = naturalWidth / naturalHeight;
+        const containerRatio = containerRect.width / containerRect.height;
+        
+        // Calculate the actual rendered area (same logic as CSS object-fit: contain)
+        if (naturalRatio > containerRatio) {
+            // Image is wider than container (limited by width)
+            // Vertical black bars (letterboxing)
+            renderedWidth = containerRect.width;
+            renderedHeight = containerRect.width / naturalRatio;
+            renderedLeft = containerRect.left;
+            renderedTop = containerRect.top + (containerRect.height - renderedHeight) / 2;
+        } else {
+            // Image is taller than container (limited by height)
+            // Horizontal black bars (pillarboxing)
+            renderedHeight = containerRect.height;
+            renderedWidth = containerRect.height * naturalRatio;
+            renderedLeft = containerRect.left + (containerRect.width - renderedWidth) / 2;
+            renderedTop = containerRect.top;
+        }
+    } else {
+        // For WebRTC mode with video or regular images
+        const contentRect = contentElement.getBoundingClientRect();
+        renderedWidth = contentRect.width;
+        renderedHeight = contentRect.height;
+        renderedLeft = contentRect.left;
+        renderedTop = contentRect.top;
+    }
+    
+    // Create visual overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'coordinate-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.border = '2px solid cyan';
+    overlay.style.backgroundColor = 'rgba(0, 255, 255, 0.2)';
+    overlay.style.boxSizing = 'border-box';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.zIndex = '10000';
+    overlay.style.width = renderedWidth + 'px';
+    overlay.style.height = renderedHeight + 'px';
+    overlay.style.left = renderedLeft + 'px';
+    overlay.style.top = renderedTop + 'px';
+    
+     
+    document.body.appendChild(overlay);
+    
+    // Auto-remove after 1 second
+    setTimeout(() => {
+        if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+    }, 1000);
+}
+
+
+function mapCoordinates(clientX, clientY) {
+    const videoContainer = document.getElementById('video-container');
+    if (!videoContainer) {
+        console.log('Video container not found');
+        return  null ;
+    }
+    
+    const containerRect = videoContainer.getBoundingClientRect();
+    
+    // Get the actual content element (video or image)
+    const contentElement = getContentElement();
+    if (!contentElement) {
+        console.log('No content element found');
+        return null;
+    }
+    
+    let xRatio, yRatio;
+    // For HTTP mode with fullscreen-cover images
+    if (contentElement.tagName === 'IMG' && contentElement.classList.contains('fullscreen-cover')) {
+        // Get natural image dimensions
+        const naturalWidth = contentElement.naturalWidth || (window.controlledScreen?.width) || 1920;
+        const naturalHeight = contentElement.naturalHeight || (window.controlledScreen?.height) || 1080;
+        
+        // Calculate aspect ratios
+        const naturalRatio = naturalWidth / naturalHeight;
+        const containerRatio = containerRect.width / containerRect.height;
+        
+        let renderedWidth, renderedHeight, renderedLeft, renderedTop;
+        
+        // Calculate the actual rendered area (same logic as CSS object-fit: contain)
+        if (naturalRatio > containerRatio) {
+            // Image is wider than container (limited by width)
+            // Vertical black bars (letterboxing)
+            renderedWidth = containerRect.width;
+            renderedHeight = containerRect.width / naturalRatio;
+            renderedLeft = containerRect.left;
+            renderedTop = containerRect.top + (containerRect.height - renderedHeight) / 2;
+        } else {
+            // Image is taller than container (limited by height)
+            // Horizontal black bars (pillarboxing)
+            renderedHeight = containerRect.height;
+            renderedWidth = containerRect.height * naturalRatio;
+            renderedLeft = containerRect.left + (containerRect.width - renderedWidth) / 2;
+            renderedTop = containerRect.top;
+        }
+        
+        // Calculate mouse position relative to the rendered image area
+        const xInRendered = clientX - renderedLeft;
+        const yInRendered = clientY - renderedTop;
+        
+        // Boundary check - make sure mouse is within the rendered image area
+        if (xInRendered < 0 || xInRendered > renderedWidth || 
+            yInRendered < 0 || yInRendered > renderedHeight) {
+            // console.log(`Mouse outside rendered area: (${xInRendered}, ${yInRendered}) not in (${renderedWidth}x${renderedHeight})`);
+            return null; // Outside rendered image area
+        }
+        
+        xRatio = xInRendered / renderedWidth;
+        yRatio = yInRendered / renderedHeight;
+    }else {
+        // For WebRTC mode
+        const contentRect = contentElement.getBoundingClientRect();
+        const xInContent = clientX - contentRect.left;
+        const yInContent = clientY - contentRect.top;
+        
+        // Boundary check
+        if (xInContent < 0 || xInContent > contentRect.width || 
+            yInContent < 0 || yInContent > contentRect.height) {
+            return null;
+        }
+        
+        xRatio = xInContent / contentRect.width;
+        yRatio = yInContent / contentRect.height;
+    }
+    
+    // Map to remote screen coordinates
+    if (window.controlledScreen) {
+        const x = Math.round(xRatio * window.controlledScreen.width);
+        const y = Math.round(yRatio * window.controlledScreen.height);
+        
+        return {
+            x: Math.max(0, Math.min(window.controlledScreen.width - 1, x)),
+            y: Math.max(0, Math.min(window.controlledScreen.height - 1, y))
+        };
+    } else {
+        return { x: Math.round(xRatio * 1920), y: Math.round(yRatio * 1080) };
+    }
+} 
+    
+
+// Add this function to handle escape key for exiting fullscreen
+function exitFullscreenOnEscape(event) {
+    if (event.key === 'Escape') {
+        // Only exit our app fullscreen, not browser fullscreen
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            // Don't prevent default for real fullscreen exit
+            return;
+        }
+        
+        // Handle our custom fullscreen exit
+        exitAppFullscreen();
+    }
+}
+
+
+// Add comprehensive debugging
+function debugUnexpectedSrcObjectChange(oldValue, newValue, context) {
+    console.group(`[WEBRTC-DEBUG] Unexpected srcObject change detected`);
+    console.log('Context:', context);
+    console.log('Old value:', oldValue);
+    console.log('New value:', newValue);
+    console.log('Call stack:', new Error().stack);
+    console.groupEnd();
+}
+
+
+// Verify WebRTC connection
+function verifyWebRTCConnection() {
+    console.log('[WEBRTC] === Connection Verification ===');
+    if (pc) {
+        console.log('[WEBRTC] PeerConnection state:', {
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+            signalingState: pc.signalingState
+        });
+        
+        const transceivers = pc.getTransceivers();
+        console.log('[WEBRTC] Transceivers:', transceivers.map((t, i) => ({
+            index: i,
+            kind: t.kind,
+            direction: t.direction,
+            currentDirection: t.currentDirection,
+            mid: t.mid
+        })));
+        
+        if (dataChannel) {
+            console.log('[WEBRTC] Data channel state:', dataChannel.readyState);
+        }
+        
+        const senders = pc.getSenders();
+        console.log('[WEBRTC] Senders:', senders.map((s, i) => ({
+            index: i,
+            track: s.track ? s.track.kind : 'none',
+            transport: s.transport ? 'available' : 'none'
+        })));
+    } else {
+        console.log('[WEBRTC] No PeerConnection available');
+    }
+    console.log('[WEBRTC] === End Connection Verification ===');
+}
+
+
+function getContentElement() {
+    const video = document.getElementById('remoteVideo');
+    const img = document.getElementById('remote-screen');
+    
+    // Use the visible element
+    if (img && !img.classList.contains('hidden')) {
+        return img;
+    }
+    if (video && !video.classList.contains('hidden')) {
+        return video;
+    }
+    
+    // Fallback to whichever element exists
+    return video || img;
+}
+
+
+//  handle manual video playback
+function setupManualPlayback() {
+    const video = getVideoElement(); // Use consistent element access
+    const manualPlayOverlay = document.getElementById('manual-play-overlay');
+    const manualPlayBtn = document.getElementById('manual-play-btn');
+    
+    if (!video || !manualPlayOverlay || !manualPlayBtn) {
+        console.warn('[MANUAL PLAY] Manual playback elements not found');
+        return null;
+    }
+    
+    // Show manual play overlay when needed
+    function showManualPlayOverlay() {
+        console.log('[MANUAL PLAY] Showing manual play overlay');
+        manualPlayOverlay.classList.remove('hidden');
+    }
+    
+    // Hide manual play overlay
+    function hideManualPlayOverlay() {
+        console.log('[MANUAL PLAY] Hiding manual play overlay');
+        manualPlayOverlay.classList.add('hidden');
+    }
+    
+    // Manual play function
+    function manualPlay() {
+        const video = getVideoElement(); // Consistent access
+        if (!video) {
+            console.error('[MANUAL PLAY] Video element not found');
+            return Promise.resolve(false);
+        }
+        
+        console.log('[MANUAL PLAY] Attempting manual play', {
+            readyState: video.readyState,
+            hasSrcObject: !!video.srcObject
+        });
+        
+        if (video.readyState >= 2) { // HAVE_CURRENT_DATA
+            const playPromise = video.play();
+            if (playPromise !== undefined) {
+                return playPromise.then(() => {
+                    console.log('[MANUAL PLAY] Video played successfully');
+                    hideManualPlayOverlay();
+                    applyVideoSizing(video);
+                    return true;
+                }).catch(error => {
+                    console.error('[MANUAL PLAY] Failed to play video:', error);
+                    showStatus('视频播放失败: ' + error.message, 'error');
+                    return false;
+                });
+            } else {
+                // Legacy browser without Promise support
+                try {
+                    video.play();
+                    hideManualPlayOverlay();
+                    applyVideoSizing(video);
+                    return Promise.resolve(true);
+                } catch (error) {
+                    console.error('[MANUAL PLAY] Failed to play video:', error);
+                    showStatus('视频播放失败: ' + error.message, 'error');
+                    return Promise.resolve(false);
+                }
+            }
+        } else {
+            showStatus('视频尚未准备好播放', 'warning');
+            return Promise.resolve(false);
+        }
+    }
+    
+    // Event listener for manual play button
+    const handleClick = (e) => {
+        e.stopPropagation();
+        console.log('[MANUAL PLAY] Manual play button clicked');
+        manualPlay();
+    };
+    
+    // Remove any existing listeners to prevent duplicates
+    manualPlayBtn.removeEventListener('click', handleClick);
+    manualPlayBtn.addEventListener('click', handleClick);
+    
+    console.log('[MANUAL PLAY] Manual playback system initialized');
+    
+    // Return functions for external use
+    return {
+        showManualPlayOverlay,
+        hideManualPlayOverlay,
+        manualPlay
+    };
+}
+
+
+// 1. 封装安全的srcObject设置函数（替代直接赋值，增加日志）
+function setVideoSrcObject(videoEl, stream) {
+    try {
+        const oldStream = videoEl.srcObject;
+        const oldStreamId = oldStream ? oldStream.id : 'null';
+        const newStreamId = stream ? stream.id : 'null';
+        
+        // 记录设置前后的状态
+        console.log(`[WEBRTC-DEBUG] 安全设置srcObject - 元素: #${videoEl.id}, 旧streamId: ${oldStreamId}, 新streamId: ${newStreamId}`);
+        
+        // 执行赋值
+        videoEl.srcObject = stream;
+        lastRecordedStreamId = newStreamId;
+        
+        // 赋值后立即验证
+        const afterSetStream = videoEl.srcObject;
+        console.log(`[WEBRTC-DEBUG] 设置后验证 - 实际streamId: ${afterSetStream ? afterSetStream.id : 'null'}, 赋值成功: ${afterSetStream?.id === newStreamId}`);
+        
+        return true;
+    } catch (error) {
+        console.error(`[WEBRTC-ERROR] 设置srcObject失败:`, error, 'stream信息:', stream);
+        return false;
+    }
+}
+
+
+//  initialize control bar toggle functionality
+function initControlBarToggle() {
+    controlBarToggleBtn = document.getElementById('control-bar-toggle');
+    controlBarCloseBtn = document.getElementById('control-bar-close');
+    
+    if (controlBarToggleBtn && controlBarCloseBtn) {
+        // Toggle button shows the control bar
+        controlBarToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showControlBar();
+        });
+        
+        // Close button hides the control bar
+        controlBarCloseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideControlBar();
+        });
+        
+        // Hide toggle button initially
+        controlBarToggleBtn.classList.add('hidden');
+    }
+}
+
+// Function to show control bar
+function showControlBar() {
+    
+    const controlBar = document.getElementById('control-bar');
+    if (controlBar) {
+        controlBar.style.transform = 'translateY(0)';
+        controlBar.classList.add('visible');
+        isControlBarVisible = true;
+    }
+}
+
+// Function to hide control bar
+function hideControlBar() {
+    const controlBar = document.getElementById('control-bar');
+    if (controlBar) {
+        controlBar.style.transform = 'translateY(-100%)';
+        controlBar.classList.remove('visible');
+        isControlBarVisible = false;
+    }
+}
+
+// Setup control events
+function setupControlEvents() {
+    
+    // Avoid adding event listeners multiple times
+    if (controlEventsAdded) {
+        console.log('[CONTROLS] Already set up, skipping');
+        return;
+    }
+    
+    console.log('[CONTROLS] Setting up control events for mode:', fallbackMode);
+    
+    // Get appropriate container based on mode
+    const container = (fallbackMode === 'webrtc') ? 
+        videoContainer : 
+        document.getElementById('remote-screen');
+    
+    if (!container) {
+        console.error('[CONTROLS] Container not found');
+        return;
+    }
+    
+    // Setup mouse controls
+    const removeMouseListeners = setupMouseControlEvents(container);
+    
+    // Setup keyboard controls
+    const removeKeyboardListeners = setupKeyboardControlEvents(document);
+    
+    // Setup control bar (use existing one)
+    const controlBar = setupControlBar(fullscreenContainer || document.getElementById('video-container'));
+    
+    // Setup control bar toggle for fullscreen mode
+    if (fullscreenContainer) {
+        createControlBarTriangle();
+        hideControlBar();
+    }
+    
+    controlEventsAdded = true;
+    
+    // Store cleanup functions
+    window.cleanupControlEvents = () => {
+        if (removeMouseListeners) removeMouseListeners();
+        if (removeKeyboardListeners) removeKeyboardListeners();
+        hideControlBar();
+    };
+    
+    console.log('[CONTROLS] Control events setup completed');
+}
+
+
+
+function startStreamMonitoring() {
+    // Clear any existing interval
+    if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+    }
+    
+    monitoringInterval = setInterval(() => {
+        try {
+            const video = getVideoElement();
+            if (!video) return;
+            
+            const currentStream = video.srcObject;
+            const currentStreamId = currentStream ? currentStream.id : 'null';
+            const isChanged = currentStreamId !== lastRecordedStreamId;
+            
+            // Log changes
+            if (isChanged && !isCleaningUp) {
+                console.warn(`[WEBRTC-DEBUG] srcObject changed - Element: #remoteVideo, Old streamId: ${lastRecordedStreamId}, New streamId: ${currentStreamId}`, {
+                    isCleaningUp: isCleaningUp,
+                    time: new Date().toLocaleTimeString(),
+                    stack: new Error().stack.split('\n')[2] // Show where this came from
+                });
+                lastRecordedStreamId = currentStreamId;
+            }
+            
+            // Regular status logging
+            console.log(`[WEBRTC-DEBUG] Periodic srcObject check - Element: #remoteVideo, hasSrcObject: ${!!currentStream}, streamId: ${currentStreamId}, videoWidth: ${video.videoWidth}, readyState: ${video.readyState}`);
+            
+        } catch (error) {
+            console.error(`[WEBRTC-ERROR] Periodic monitoring failed:`, error);
+        }
+    }, 30000); // Check every 5 seconds
+    
+    return monitoringInterval;
+}
+
+// Periodic state consistency checking
+function startConsistencyMonitoring() {
+    if (consistencyCheckInterval) {
+        clearInterval(consistencyCheckInterval);
+    }
+    
+    consistencyCheckInterval = setInterval(() => {
+        const state = checkStateConsistency();
+        if (!state.consistent) {
+            console.warn('[STATE] State inconsistency detected:', state);
+        }
+        
+        // Regular status logging
+        const video = getVideoElement();
+        if (video) {
+            const currentStream = video.srcObject;
+            const currentStreamId = currentStream ? currentStream.id : 'null';
+            
+            console.log(`[WEBRTC-DEBUG] Periodic srcObject check - Element: #remoteVideo, hasSrcObject: ${!!currentStream}, streamId: ${currentStreamId}, videoWidth: ${video.videoWidth}, readyState: ${video.readyState}`);
+        }
+    }, 30000); // Check every 5 seconds
+}
+
+function stopConsistencyMonitoring() {
+    if (consistencyCheckInterval) {
+        clearInterval(consistencyCheckInterval);
+        consistencyCheckInterval = null;
+    }
+}
+
+async function switchToHTTPMode(password) {
+    console.log('[MODE] Switching to HTTP mode');
+    
+    // Clean up WebRTC resources first
+    disconnectWebRTC();
+    
+    // Clear any existing state
+    if (dataChannel) {
+        dataChannel = null;
+    }
+    pc = null;
+    
+    // Then establish HTTP session
+    try {
+        await establishHTTPSession(password);
+        fallbackMode = 'http';
+        activeMode = 'http';
+        showStatus('已切换到HTTP模式', 'success');
+        console.log('[MODE] Successfully switched to HTTP mode');
+        return true;
+    } catch (e) {
+        console.error('[MODE] Failed to switch to HTTP mode:', e);
+        showStatus('HTTP连接失败: ' + e.message, 'error');
+        return false;
+    }
+}
+
+// Enhanced stream management
+function registerStream(stream) {
+    console.log(`[STREAM] Registering stream: ${stream.id}`);
+    currentStream = stream;
+    streamToVideoBinding.set(stream, getVideoElement());
+    
+    // Register all tracks in the stream
+    stream.getTracks().forEach(track => {
+        registerTrack(track);
+    });
+    
+    // Monitor stream for changes (only if monitorStream is defined)
+    if (typeof monitorStream === 'function') {
+        try {
+            monitorStream(stream);
+        } catch (error) {
+            console.error('[STREAM] Failed to monitor stream:', error);
+        }
+    } else {
+        console.warn('[STREAM] monitorStream function not available');
+    }
+}
+
+// 监控流和轨道状态
+function monitorStream(stream) {
+    if (!stream) return;
+    console.log(`[WEBRTC-DEBUG] 开始监控流: 活跃=${stream.active}, 轨道数=${stream.getTracks().length}`);
+
+    // 监听流活跃状态（每2秒检查，无原生事件）
+    // const intervalId = setInterval(() => {
+    //     if (!stream) {
+    //         clearInterval(intervalId);
+    //         return;
+    //     }
+        
+    //     console.log(`[WEBRTC-DEBUG] 流状态: 活跃=${stream.active}`);
+    //     if (!stream.active) {
+    //         stream.getVideoTracks().forEach((track, i) => {
+    //             console.warn(`[WEBRTC-DEBUG] 流不活跃 - Track${i}: 就绪态=${track.readyState}, 启用=${track.enabled}`);
+    //         });
+    //     }
+    // }, 20000);
+    
+    // 监控轨道结束事件
+    stream.getVideoTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+            console.error(`[WEBRTC-DEBUG] 视频轨道结束: 就绪态=${track.readyState}（可能是远端停止发送）`);
+        });
+    });
+    
+    // 监听每个轨道的状态变化
+    stream.getTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+            console.error(`[WEBRTC-DEBUG] 轨道中断 - trackId: ${track.id}, kind: ${track.kind}, readyState: ${track.readyState}（轨道已结束）`);
+        });
+        track.addEventListener('mute', () => {
+            console.warn(`[WEBRTC-DEBUG] 轨道变更 - trackId: ${track.id}, kind: ${track.kind}, muted: true`);
+        });
+        track.addEventListener('unmute', () => {
+            console.log(`[WEBRTC-DEBUG] 轨道变更 - trackId: ${track.id}, kind: ${track.kind}, muted: false`);
+        });
+    });
+    
+    return intervalId; // Return interval ID so it can be cleared if needed
+}
+
+function registerTrack(track) {
+    console.log(`[TRACK] Registering track: ${track.id}`);
+    currentTracks.set(track.id, track);
+    
+    // Add event listeners for track lifecycle
+    track.addEventListener('ended', () => {
+        console.log(`[TRACK] Track ended: ${track.id}`);
+        unregisterTrack(track.id);
+    });
+    
+    track.addEventListener('mute', () => {
+        console.log(`[TRACK] Track muted: ${track.id}`);
+    });
+    
+    track.addEventListener('unmute', () => {
+        console.log(`[TRACK] Track unmuted: ${track.id}`);
+    });
+}
+
+function unregisterTrack(trackId) {
+    console.log(`[TRACK] Unregistering track: ${trackId}`);
+    currentTracks.delete(trackId);
+}
+
+
+// Enhanced disconnect cleanup
+function cleanupMediaResources() {
+    console.log('[CLEANUP] Cleaning up media resources');
+    
+    // Stop consistency monitoring first
+    stopConsistencyMonitoring();
+    
+    // Clear the video srcObject
+    const video = getVideoElement();
+    if (video && video.srcObject) {
+        console.log('[CLEANUP] Clearing video srcObject');
+        video.srcObject = null;
+    }
+    
+    // Stop all tracks
+    currentTracks.forEach((track, trackId) => {
+        console.log(`[CLEANUP] Stopping track: ${trackId}`);
+        try {
+            if (track.stop) {
+                track.stop();
+            }
+        } catch (e) {
+            console.warn(`[CLEANUP] Failed to stop track ${trackId}:`, e);
+        }
+    });
+    
+    // Clear collections
+    currentTracks.clear();
+    currentStream = null;
+    lastRecordedStreamId = null;
+}
+
+// Enhanced recovery mechanism with better logging
+async function attemptStateRecovery() {
+    const video = getVideoElement();
+    if (!video) {
+        console.error('[RECOVERY] Cannot recover - no video element');
+        return false;
+    }
+    
+    console.log('[RECOVERY] Attempting state recovery');
+    
+    // Case 1: Video has lost its srcObject but we still have the stream
+    if (currentStream && !video.srcObject) {
+        console.log('[RECOVERY] Rebinding stream to video element');
+        try {
+            video.srcObject = currentStream;
+            console.log('[RECOVERY] Stream rebound successfully');
+            showStatus('视频流已恢复', 'success');
+            
+            // Verify recovery was successful
+            setTimeout(() => {
+                const state = checkStateConsistency();
+                if (state.consistent) {
+                    console.log('[RECOVERY] State is now consistent after recovery');
+                } else {
+                    console.warn('[RECOVERY] State still inconsistent after recovery:', state);
+                }
+            }, 50);
+            
+            return true;
+        } catch (error) {
+            console.error('[RECOVERY] Failed to rebind stream:', error);
+        }
+    }
+    
+    // Case 2: We have a srcObject but no currentStream reference
+    if (video.srcObject && !currentStream) {
+        console.log('[RECOVERY] Recovering stream reference');
+        currentStream = video.srcObject;
+        // Re-register tracks
+        currentStream.getTracks().forEach(track => {
+            if (!currentTracks.has(track.id)) {
+                registerTrack(track);
+            }
+        });
+        return true;
+    }
+    
+    console.log('[RECOVERY] No recovery action needed or all attempts failed');
+    return false;
+}
+
+
+// Enhanced state synchronization checker
+function checkStateConsistency() {
+    const video = getVideoElement();
+    if (!video) return { consistent: false, error: 'No video element' };
+    
+    const currentSrcObject = video.srcObject;
+    const hasStream = !!currentSrcObject;
+    const expectedStream = currentStream;
+    
+    // Check if video element has the expected stream
+    const streamConsistent = currentSrcObject === expectedStream;
+    
+    // Check track consistency
+    let tracksConsistent = true;
+    if (currentSrcObject && expectedStream) {
+        const currentTracks = new Set(currentSrcObject.getTracks().map(t => t.id));
+        const expectedTracks = new Set(expectedStream.getTracks().map(t => t.id));
+        
+        // Check if all expected tracks are present
+        for (const trackId of expectedTracks) {
+            if (!currentTracks.has(trackId)) {
+                tracksConsistent = false;
+                break;
+            }
+        }
+    }
+    
+    return {
+        consistent: streamConsistent && tracksConsistent,
+        streamConsistent,
+        tracksConsistent,
+        hasStream,
+        expectedStream: !!expectedStream,
+        videoHasSrcObject: hasStream
+    };
+}
+
+
+function createManagedStream() {
+    const stream = new MediaStream();
+    managedStreams.add(stream);
+    console.log(`[WEBRTC-DEBUG] Created managed stream: ${stream.id}`, {
+        totalStreams: managedStreams.size
+    });
+    return stream;
+}
+
+function destroyManagedStream(stream) {
+    if (stream && managedStreams.has(stream)) {
+        console.log(`[WEBRTC-DEBUG] Destroying managed stream: ${stream.id}`);
+        // Stop all tracks before removing
+        stream.getTracks().forEach(track => {
+            track.stop();
+        });
+        managedStreams.delete(stream);
+    }
+}
+
+// Clean up all streams on disconnect
+function cleanupAllStreams() {
+    console.log(`[WEBRTC-DEBUG] Cleaning up ${managedStreams.size} managed streams`);
+    managedStreams.forEach(stream => {
+        stream.getTracks().forEach(track => track.stop());
+    });
+    managedStreams.clear();
+}
+
+// Enhanced state change detection with debounce
+function setupStateChangeDetection() {
+    const video = getVideoElement();
+    if (!video) return;
+    
+    let stateCheckTimeout = null;
+    
+    const handleSrcObjectChange = () => {
+        // Clear any pending checks
+        if (stateCheckTimeout) {
+            clearTimeout(stateCheckTimeout);
+        }
+        
+        // Wait a bit for state to stabilize
+        stateCheckTimeout = setTimeout(() => {
+            const state = checkStateConsistency();
+            if (!state.consistent) {
+                console.warn('[STATE] Inconsistency detected:', state);
+                attemptStateRecovery();
+            }
+        }, 100); // Wait 100ms for state to stabilize
+    };
+    
+    // Listen to video events that might indicate state changes
+    const events = ['loadstart', 'loadedmetadata', 'loadeddata', 'playing', 'pause', 'ended'];
+    events.forEach(event => {
+        video.addEventListener(event, handleSrcObjectChange);
+    });
+}
+
+// Make sure to call this after the video element is available
+document.addEventListener('DOMContentLoaded', () => {
+    setupStateChangeDetection();
+});
+
+
+// Add this function to toggle control bar visibility
+function toggleControlBar() {
+    if (!controlBar) return;
+    
+    const isHidden = controlBar.style.transform === 'translateY(-100%)' || 
+                     getComputedStyle(controlBar).transform === 'matrix(1, 0, 0, 1, 0, -100)';
+    
+    if (isHidden) {
+        showControlBar();
+    } else {
+        hideControlBar();
+    }
+}
+
+// Enhanced debugging function:
+function debugVideoState(source) {
+    const video = getVideoElement();
+    if (!video) {
+        console.log(`[DEBUG-${source}] Video element not found`);
+        return;
+    }
+    
+    const hasSrcObject = !!getVideoElement().srcObject;
+    const streamId = getVideoElement().srcObject ? getVideoElement().srcObject.id : 'null';
+    const trackCount = getVideoElement().srcObject ? getVideoElement().srcObject.getTracks().length : 0;
+    
+    console.log(`[DEBUG-${source}] Video state:`, {
+        hasSrcObject,
+        streamId,
+        trackCount,
+        readyState: video.readyState,
+        videoWidth: video.videoWidth
+    });
+}
+
+// Enhanced debugging with consistent references
+function debugSrcObject(source) {
+    const video = getVideoElement();
+    if (!video) {
+        console.log(`[DEBUG-${source}] Video element not found`);
+        return;
+    }
+    
+    const hasSrcObject = !!video.srcObject;
+    const streamId = video.srcObject ? video.srcObject.id : 'null';
+    
+    console.log(`[DEBUG-${source}] srcObject state:`, {
+        hasSrcObject,
+        streamId,
+        elementId: video.id,
+        elementExists: !!document.getElementById('remoteVideo')
+    });
+}
+
+// Debug function to check overlay visibility
+function debugOverlayVisibility() {
+    const manualOverlay = document.getElementById('manual-play-overlay');
+    const promptOverlay = document.getElementById('play-prompt-container');
+    const videoContainer = document.getElementById('video-container');
+    
+    console.log('[DEBUG] Overlay visibility check:', {
+        manualOverlay: manualOverlay ? 'exists' : 'missing',
+        manualOverlayHidden: manualOverlay ? manualOverlay.classList.contains('hidden') : 'N/A',
+        promptOverlay: promptOverlay ? 'exists' : 'missing',
+        videoContainer: videoContainer ? 'exists' : 'missing'
+    });
+}
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Focus on the password input field when the page loads
+    if (passwordInput) {
+        passwordInput.focus();
+    }
+});
+
+// 页面关闭时断开连接
+window.addEventListener('beforeunload', () => {
+    if (isConnected) {
+        disconnect();
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('[INIT] Initializing manual playback controls');
+    manualPlaybackControls = setupManualPlayback();
+    
+    // Test if it's working
+    if (manualPlaybackControls) {
+        console.log('[INIT] Manual playback controls initialized successfully');
+    } else {
+        console.warn('[INIT] Manual playback controls failed to initialize');
+    }
+});
+
+// You can also add this line to periodically check the connection (optional)
+// setInterval(verifyVideoStream, 30000); // Check every 3 seconds
+// setInterval(() => {
+//     debugSrcObject('periodic-check');
+// }, 30000);
+
+    </script>
+</body>
+</html>
